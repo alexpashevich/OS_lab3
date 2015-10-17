@@ -22,14 +22,11 @@ int main (int argc, char *argv[]) {
         exit (-3);
 
     result = my_fread(&c, 1, 1, f1);
-    // fprintf(stderr, "reading\n");
     while (result == 1) {
-        // fprintf(stderr, "writing\n");
         result = my_fwrite(&c, 1, 1, f2);
         if (result == -1)
             exit(-4);
         result = my_fread(&c, 1, 1, f1);
-        // fprintf(stderr, "reading\n");
     }
     if (result == -1)
         exit(-5);

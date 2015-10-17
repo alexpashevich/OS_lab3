@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <stdarg.h>
 // #include "my_stdio.h"
 
 #define BUFFER_SIZE 100
@@ -11,14 +12,12 @@ typedef struct {
     FILE *file;
     char *mode;
     char *buffer;
-    int buf_size; // 0 when initialized, -1 if error during read/write occured
-    int pointer; // -1 when initialized
-    bool file_is_finished;
-    bool eof_was_read;
+    int buf_size; // initialized with BUFFER_SIZE value
+    int pointer; // current position in buffer, -1 when initialized
+    bool eof_was_read; // all the physical file was read to the buffer
+    bool file_is_finished; // all the file was read by user
 } MY_FILE;
 
-/* Opens an access to a file, where name is the path to the file and mode is either ”r” for read or ”w” for write.
-Returns a pointer to a MY FILE structure upon success and NULL otherwise.*/
 MY_FILE *my_fopen(char *name, char *mode) {
     if (strlen(mode) != 1) {
         fprintf(stderr, "MY_FOPEN: Wrong open mode, should be 'w' or 'r'\n");
@@ -33,59 +32,37 @@ MY_FILE *my_fopen(char *name, char *mode) {
         fprintf(stderr, "MY_FOPEN: Error during opening the file\n");
         return NULL;
     }
-    // CHECK: not sure
+
     MY_FILE *myfile = (MY_FILE*) malloc(sizeof(MY_FILE));
     myfile->file = fd;
     myfile->mode = (char*) malloc(sizeof(char));
-    memcpy(myfile->mode, mode, 1);
+    myfile->mode[0] = mode[0];
     myfile->buf_size = BUFFER_SIZE;
     myfile->pointer = -1;
     myfile->eof_was_read = false;
     myfile->file_is_finished = false;
-    myfile->buffer = (char*) malloc(sizeof(char) * BUFFER_SIZE);
+    myfile->buffer = (char*) malloc(BUFFER_SIZE);
     return myfile;
 }
 
-/*Closes the access to the file associated to f. Returns 0 upon success and -1 otherwise.*/
 int my_fclose(MY_FILE *f) {
+    int result = 0;
+    if (f->mode[0] == 'w') {
+        if (f->pointer > 0) {
+            // if something was not written to the physical file from the buffer
+            if (fwrite(f->buffer, 1, f->pointer, f->file) < f->pointer) {
+                // error occured
+                result = -1;
+            }
+        }
+    }
+    fclose(f->file);
     free(f->mode);
     free(f->buffer);
     free(f);
-    // what else???
-    return 0;
+    return result;
 }
 
-/*Reads BUFFER_SIZE bytes into the buffer. Also set f.pointer, f.buf_size, f.eof_was_read and f.file_is_finished.
-Returns number of bytes read or 0 if the file is over. 
-Returns -1 if error during system read occures and set f.buf_size to -1.*/
-// int read_new_buffer(MY_FILE *f) {
-//     if (f->eof_was_read) {
-//         return 0;
-//     }
-//     int status = fread(f->buffer, 1, BUFFER_SIZE, f->file);
-//     f->buf_size = status;
-//     if (status < BUFFER_SIZE) {
-//         // eof was reached or error occured
-//         if (feof(f->file) != 0) {
-//             // error occured
-//             f->buf_size = -1;
-//             status = -1;
-//         } else {
-//             // eof was reached
-//             f->eof_was_read = true;
-//             if (status == 0) {
-//                 f->file_is_finished = true;
-//             }
-//         }
-//     }
-//     f->pointer = 0;
-//     return status;
-// }
-
-/*Reads at most nbelem elements of size size from file access f, that has to have been opened with mode ”r”, 
-and places them at the address pointed by p. 
-Returns the number of elements actually read, 0 if an end-of-file has been encountered before any element has been 
-read and -1 if an error occurred.*/
 int my_fread(void *p, size_t size, size_t nbelem, MY_FILE *f) {
     if (!f) {
         fprintf(stderr, "MY_FREAD: f == NULL\n");
@@ -107,11 +84,15 @@ int my_fread(void *p, size_t size, size_t nbelem, MY_FILE *f) {
     int p_pointer = 0;
     int size_rest = nbelem * size;
     while (size_rest > 0 && !f->file_is_finished) {
+        // until we read everything that user asked for or eof is reached
         if (f->pointer == -1 || f->pointer == f->buf_size) {
+            // if file was just opened or buffer is full
+            // in both cases we need to read some bytes
             f->pointer = 0;
             f->buf_size = 0;
 
             if (!f->eof_was_read) {
+                // if f->eof_was_read we can not read more and leave the function
                 int status = fread(f->buffer, 1, BUFFER_SIZE, f->file);
                 f->buf_size = status;
                 if (status < BUFFER_SIZE) {
@@ -139,12 +120,9 @@ int my_fread(void *p, size_t size, size_t nbelem, MY_FILE *f) {
         p_pointer += bytes_to_read;
         size_rest -= bytes_to_read;
     }
-    // maybe divide returned value by nbelem
-    return nbelem * size - size_rest;
+    return nbelem - size_rest / size;
 }
 
-/*Writes at most nbelem elements of size size to file access f, that has to have been opened with mode ”w”, 
-taken at the address pointed by p. Returns the number of elements actually written and -1 if an error occured.*/
 int my_fwrite(void *p, size_t size, size_t nbelem, MY_FILE *f) {
     if (!f) {
         fprintf(stderr, "MY_FWRITE: f == NULL\n");
@@ -166,17 +144,20 @@ int my_fwrite(void *p, size_t size, size_t nbelem, MY_FILE *f) {
     int p_pointer = 0;
     int size_rest = nbelem * size;
     while (size_rest > 0) {
+        // until we write everything user asked for
         if (f->pointer == -1) {
+            // file was just opened
             f->pointer = 0;
         }
 
         int bytes_to_write = min(f->buf_size - f->pointer, size_rest);
-        memcpy(p + p_pointer, f->buffer + f->pointer, bytes_to_write);
+        memcpy(f->buffer + f->pointer, p + p_pointer, bytes_to_write);
         f->pointer += bytes_to_write;
         p_pointer += bytes_to_write;
         size_rest -= bytes_to_write;
 
         if (f->pointer == f->buf_size) {
+            // if buffer is full
             if (fwrite(f->buffer, 1, f->buf_size, f->file) < f->buf_size) {
                 fprintf(stderr, "MY_FWRITE: Error during fwrite()\n");
                 return -1;
@@ -184,17 +165,58 @@ int my_fwrite(void *p, size_t size, size_t nbelem, MY_FILE *f) {
             f->pointer = 0;
         }
     }
-    return nbelem * size - size_rest;
+    return nbelem - size_rest / size;
 }
-/*Work only for mode = "r", return 1 if the file was readen till the end and 0 otherwise*/
+
 int my_feof(MY_FILE *f) {
     if (f->mode[0] == 'w') {
+        // eof is impossible in writing mode
         return 0;
     }
     return (f->file_is_finished ? 1 : 0);
 }
 
+int my_fprintf(MY_FILE *f, char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int i, d;
+    char c, *s;
+    for (i = 0; i < strlen(format); ++i) {
+        // iterate over the format string and either copy it to f or replace %s, %d, %c by provided args
+        if (format[i] != '%') {
+            my_fwrite(format + i, 1, 1, f);
+        } else {
+            ++i;
+            if (i == strlen(format)) {
+                fprintf(stderr, "MY_FPRINTF: Incorrect format string\n");
+                return -1;
+            }
+            switch(format[i]) {
+                case 'c' :
+                    c = (char) va_arg(args, int);
+                    // type int used because of the realization of va_arg
+                    // http://stackoverflow.com/questions/28054194/char-type-in-va-arg
+                    my_fwrite(&c, 1, 1, f);
+                    break;
+                case 's' :
+                    s = va_arg(args, char *);
+                    my_fwrite(s, 1, strlen(s), f);
+                    break;
+                case 'd' :
+                    d = va_arg(args, int);
+                    my_fwrite(&d, sizeof(int), 1, f);
+                    break;
+                default :
+                    fprintf(stderr, "MY_FPRINTF: Incorrect format string\n");
+                    return -1;
+            }
+        }
+    }
+    va_end(args);
+    return 0;
+}
 
-
-
-
+int my_fscanf(MY_FILE *f, char *format, ...) {
+    // TODO: implement
+    return 0;
+}
