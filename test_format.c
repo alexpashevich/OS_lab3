@@ -16,11 +16,11 @@ int main (int argc, char *argv[])
         exit (-3);
     my_fprintf(f2, "Input file: %s\n", argv[1]);
     my_fscanf(f1, "%c", &c);
-    while (!feof(f1)) {
-        my_fprintf(f2, "Character %c read, its ASCII code is %d\n", c, c);
+    while (!my_feof(f1)) {
+        my_fprintf(f2, "Character %c read, its ASCII code is %d\n", c, (int)c);
         my_fscanf(f1, "%c", &c);
     }
-    fclose(f1);
-    fclose(f2);
+    my_fclose(f1);
+    my_fclose(f2);
     return 0;
 }

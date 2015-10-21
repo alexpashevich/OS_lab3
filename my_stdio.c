@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <math.h>
-// #include "my_stdio.h"
 
 #define BUFFER_SIZE 100
 #define min(a, b) (a < b ? a : b)
@@ -198,16 +197,39 @@ int my_fprintf(MY_FILE *f, char *format, ...) {
                     c = (char) va_arg(args, int);
                     // type int used because of the realization of va_arg
                     // http://stackoverflow.com/questions/28054194/char-type-in-va-arg
-                    my_fwrite(&c, 1, 1, f);
+                    if (my_fwrite(&c, 1, 1, f) == -1) {
+                        fprintf(stderr, "MY_FPRINTF: Error during my_fwrite()\n");
+                        return -1;
+                    }
                     break;
                 case 's' :
                     s = va_arg(args, char *);
-                    my_fwrite(s, 1, strlen(s), f);
+                    if (my_fwrite(s, 1, strlen(s), f) == -1) {
+                        fprintf(stderr, "MY_FPRINTF: Error during my_fwrite()\n");
+                        return -1;
+                    }
                     break;
                 case 'd' :
                     d = va_arg(args, int);
-                    my_fwrite(&d, sizeof(int), 1, f);
-                    // TODO: rewrite - write int as chars (?)
+                    fprintf(stderr, "%d read\n", d);
+                    int d_pow = 0, d_char, status = 0;
+                    // we want d_pow: 10^d_pow < d < 10^(d_pow + 1)
+                    while (d >= (int) pow(10, d_pow + 1)) {
+                        ++d_pow;
+                    }
+                    while (status != -1 && d_pow >= 0) {
+                        d_char = d / (int) pow(10, d_pow);
+                        // d_char is the biggest digit
+                        d %= (int) pow(10, d_pow);
+                        // store the rest in d
+                        --d_pow;
+                        c = '0' + d_char;
+                        status = my_fwrite(&c, 1, 1, f);
+                    }
+                    if (status == -1) {
+                        fprintf(stderr, "MY_FPRINTF: Error during my_fwrite()\n");
+                        return -1;
+                    }
                     break;
                 default :
                     fprintf(stderr, "MY_FPRINTF: Incorrect format string\n");
@@ -222,14 +244,13 @@ int my_fprintf(MY_FILE *f, char *format, ...) {
 int my_fscanf(MY_FILE *f, char *format, ...) {
     va_list args;
     va_start(args, format);
-    int i;
+    int i, j, status, *d;
     char *c, *s;
-    int *d;
     for (i = 0; i < strlen(format); ++i) {
         switch(i % 3) {
             case 0:
                 if (format[i] != '%') {
-                    fprintf(stderr, "MY_FSCANF: Incorrect format string, expected \"\%q \%q ...\" where q in {c, s, d}\n");
+                    fprintf(stderr, "MY_FSCANF: Incorrect format string, expected \"%%q %%q ...\" where q in {c, s, d}\n");
                     return -1;
                 }
                 break;
@@ -244,8 +265,9 @@ int my_fscanf(MY_FILE *f, char *format, ...) {
                         break;
                     case 's' :
                         s = va_arg(args, char*);
-                        int j = 0;
+                        j = 0;
                         status = my_fread(s, 1, 1, f);
+                        // read char by char and stop when \n is reached
                         while (status != -1 && s[j] != '\n') {
                             ++j;
                             status = my_fread(s + j, 1, 1, f);
@@ -257,11 +279,17 @@ int my_fscanf(MY_FILE *f, char *format, ...) {
                         break;
                     case 'd' :
                         d = va_arg(args, int*);
-                        int j = 0;
-                        int result, status;
+                        j = 0;
+                        // write result here and then put it in *d
+                        int result = 0;
                         status = my_fread(c, 1, 1, f);
+                        if (c[0] < '0' || c[0] > '9') {
+                            fprintf(stderr, "MY_FSCANF: input which is supposed to be an integer is not an integer\n");
+                            return -1;
+                        }
+                        // read char by char and stop when one if them
                         while (c[0] >= '0' && c[0] <= '9') {
-                            result += atoi(c) * pow(10, j);
+                            result += atoi(c) * (int) pow(10, j);
                             ++j;
                             status = my_fread(c, 1, 1, f);
                         }
@@ -276,6 +304,11 @@ int my_fscanf(MY_FILE *f, char *format, ...) {
                         return -1;
                 }
                 break;
+            case 2:
+                if (format[i] != ' ') {
+                    fprintf(stderr, "MY_FSCANF: Incorrect format string, expected \"%%q %%q...\" where q in {c, s, d}\n");
+                    return -1;
+                }
         }
     }
     return 0;
