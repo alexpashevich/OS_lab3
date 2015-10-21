@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <math.h>
 // #include "my_stdio.h"
 
 #define BUFFER_SIZE 100
@@ -188,6 +189,7 @@ int my_fprintf(MY_FILE *f, char *format, ...) {
         } else {
             ++i;
             if (i == strlen(format)) {
+                // if we reach the end of string right after we read % - so string is smth like "...%" which is incorrect
                 fprintf(stderr, "MY_FPRINTF: Incorrect format string\n");
                 return -1;
             }
@@ -205,6 +207,7 @@ int my_fprintf(MY_FILE *f, char *format, ...) {
                 case 'd' :
                     d = va_arg(args, int);
                     my_fwrite(&d, sizeof(int), 1, f);
+                    // TODO: rewrite - write int as chars (?)
                     break;
                 default :
                     fprintf(stderr, "MY_FPRINTF: Incorrect format string\n");
@@ -217,6 +220,71 @@ int my_fprintf(MY_FILE *f, char *format, ...) {
 }
 
 int my_fscanf(MY_FILE *f, char *format, ...) {
-    // TODO: implement
+    va_list args;
+    va_start(args, format);
+    int i;
+    char *c, *s;
+    int *d;
+    for (i = 0; i < strlen(format); ++i) {
+        switch(i % 3) {
+            case 0:
+                if (format[i] != '%') {
+                    fprintf(stderr, "MY_FSCANF: Incorrect format string, expected \"\%q \%q ...\" where q in {c, s, d}\n");
+                    return -1;
+                }
+                break;
+            case 1:
+                switch(format[i]) {
+                    case 'c' :
+                        c = va_arg(args, char*);
+                        if (my_fread(c, 1, 1, f) == -1) {
+                            fprintf(stderr, "MY_FSCANF: Error during my_fread()\n");
+                            return -1;
+                        }
+                        break;
+                    case 's' :
+                        s = va_arg(args, char*);
+                        int j = 0;
+                        status = my_fread(s, 1, 1, f);
+                        while (status != -1 && s[j] != '\n') {
+                            ++j;
+                            status = my_fread(s + j, 1, 1, f);
+                        }
+                        if (status == -1) {
+                            fprintf(stderr, "MY_FSCANF: Error during my_fread()\n");
+                            return -1;
+                        }
+                        break;
+                    case 'd' :
+                        d = va_arg(args, int*);
+                        int j = 0;
+                        int result, status;
+                        status = my_fread(c, 1, 1, f);
+                        while (c[0] >= '0' && c[0] <= '9') {
+                            result += atoi(c) * pow(10, j);
+                            ++j;
+                            status = my_fread(c, 1, 1, f);
+                        }
+                        if (status == -1) {
+                            fprintf(stderr, "MY_FSCANF: Error during my_fread()\n");
+                            return -1;
+                        }
+                        *d = result;
+                        break;
+                    default :
+                        fprintf(stderr, "MY_FPRINTF: Incorrect format string\n");
+                        return -1;
+                }
+                break;
+        }
+    }
     return 0;
 }
+
+
+
+
+
+
+
+
